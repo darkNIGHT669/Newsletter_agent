@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Generated at runtime — not part of the project source
+checkpoints.sqlite
+checkpoints.sqlite-*
+outputs/*.html
+outputs/*.md
