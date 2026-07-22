@@ -270,7 +270,22 @@ graph = get_graph()
 with st.sidebar:
     st.header("Configuration")
 
-    provider = os.getenv("LLM_PROVIDER", "anthropic")
+    provider = os.getenv("LLM_PROVIDER", "gemini").lower()
+    
+    # Allow user/reviewer to input custom API keys for the selected provider
+    if provider == "gemini":
+        gemini_key = st.text_input("Google API Key", type="password", value=os.getenv("GOOGLE_API_KEY", ""))
+        if gemini_key:
+            os.environ["GOOGLE_API_KEY"] = gemini_key
+    elif provider == "openai":
+        openai_key = st.text_input("OpenAI API Key", type="password", value=os.getenv("OPENAI_API_KEY", ""))
+        if openai_key:
+            os.environ["OPENAI_API_KEY"] = openai_key
+    elif provider == "anthropic":
+        anthropic_key = st.text_input("Anthropic API Key", type="password", value=os.getenv("ANTHROPIC_API_KEY", ""))
+        if anthropic_key:
+            os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+
     st.caption(f"LLM provider: `{provider}` (set LLM_PROVIDER in .env to change)")
 
     mode = st.radio(
