@@ -24,7 +24,7 @@ from langgraph.types import Command
 from agent.graph import get_graph, load_thread_state
 from agent.state import initial_state
 
-st.set_page_config(page_title="Newsletter Agent", page_icon="📰", layout="wide")
+st.set_page_config(page_title="Newsletter Agent", page_icon="❖", layout="wide")
 
 # --- Custom Styling & Premium Theme CSS ----------------------------------------
 st.markdown("""
@@ -253,8 +253,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📰 Autonomous Newsletter Agent")
-st.caption("LangGraph agent: Plan → Research → Draft → Critique (3 parallel critics) → (Human Review) → Send")
+st.title("Autonomous Newsletter Agent")
+st.caption("A multi-agent LangGraph system for automated research, writing, and editorial review.")
 
 # --- session state bootstrap -------------------------------------------------
 if "thread_id" not in st.session_state:
@@ -300,15 +300,15 @@ with st.sidebar:
         height=100,
     )
 
-    run_clicked = st.button("🚀 Run Agent", type="primary", width="stretch")
-    reset_clicked = st.button("🔄 Reset Session", width="stretch")
+    run_clicked = st.button("Run Agent", type="primary", width="stretch")
+    reset_clicked = st.button("Reset Session", width="stretch")
 
     st.divider()
     st.caption("Session persists across app restarts (checkpoints.sqlite).")
     st.text_input("Current thread ID", value=st.session_state.thread_id, disabled=True)
     with st.expander("Resume a paused session"):
         resume_id = st.text_input("Thread ID to resume", key="resume_id_input")
-        resume_clicked = st.button("↺ Load", width="stretch")
+        resume_clicked = st.button("Load", width="stretch")
 
 if reset_clicked:
     st.session_state.thread_id = f"session-{os.urandom(4).hex()}"
@@ -380,14 +380,14 @@ def render_pipeline(completed_stages: set, current_stage: str, run_mode: str):
         if s == current_stage:
             html_parts.append(f'''
                 <div class="pipeline-step active">
-                    <span class="step-icon">⚡</span>
+                    <span class="step-icon">●</span>
                     <span class="step-label">{label}</span>
                 </div>
             ''')
         elif s in completed_stages:
             html_parts.append(f'''
                 <div class="pipeline-step completed">
-                    <span class="step-icon">✓</span>
+                    <span class="step-icon">✔</span>
                     <span class="step-label">{label}</span>
                 </div>
             ''')
@@ -405,7 +405,7 @@ def render_pipeline(completed_stages: set, current_stage: str, run_mode: str):
 
 # --- rendering helpers ---------------------------------------------------
 def render_logs(logs, expanded=True):
-    with st.expander("🧠 Agent Reasoning Log", expanded=expanded):
+    with st.expander("Agent Reasoning Log", expanded=expanded):
         for line in logs:
             st.text(line)
 
@@ -433,7 +433,7 @@ def render_trace_summary(trace: list):
     known_tokens = any(e["input_tokens"] is not None for e in trace)
     total_tokens = sum((e["input_tokens"] or 0) + (e["output_tokens"] or 0) for e in trace)
 
-    with st.expander("⏱️ Cost & latency trace", expanded=False):
+    with st.expander("Cost & latency trace", expanded=False):
         c1, c2, c3 = st.columns(3)
         c1.metric("LLM calls so far", len(trace))
         c1.metric("Total compute time", f"{total_ms:.0f} ms")
@@ -480,7 +480,7 @@ def render_snapshot(state: dict, run_mode: str, completed_stages: set, current_s
         if state.get("subject") or state.get("draft_markdown"):
             st.markdown('<div class="newsletter-card">', unsafe_allow_html=True)
             if state.get("subject"):
-                st.subheader(f"📬 {state['subject']}")
+                st.subheader(state['subject'])
             if state.get("draft_markdown"):
                 st.markdown(state["draft_markdown"])
             st.markdown('</div>', unsafe_allow_html=True)
@@ -489,11 +489,11 @@ def render_snapshot(state: dict, run_mode: str, completed_stages: set, current_s
             st.metric("Blended Score", f"{state.get('critique_score', '-')}/10")
             st.info(state["critique_feedback"])
         if state.get("final_path"):
-            st.success(f"✅ Sent (simulated) — saved to `{state['final_path']}`")
+            st.success(f"Sent (simulated) — saved to `{state['final_path']}`")
             try:
                 with open(state["final_path"], "r", encoding="utf-8") as f:
                     st.download_button(
-                        "⬇ Download HTML", f.read(), file_name="newsletter.html", mime="text/html"
+                        "Download HTML", f.read(), file_name="newsletter.html", mime="text/html"
                     )
             except FileNotFoundError:
                 pass
@@ -551,22 +551,57 @@ def run_agent_streaming(stream_input, run_mode: str, placeholder):
 
 
 # --- run agent ---------------------------------------------------
-if run_clicked:
-    placeholder = st.empty()
-    final_state, interrupt_payload = run_agent_streaming(
-        initial_state(goal, mode), mode, placeholder
-    )
-    if interrupt_payload is not None:
-        st.session_state.pending_interrupt = interrupt_payload
-        st.session_state.state = graph.get_state(config).values
+# Helper to format and display execution errors cleanly without python tracebacks
+def handle_execution_error(e):
+    error_msg = str(e)
+    if "RESOURCE_EXHAUSTED" in error_msg or "429" in error_msg:
+        st.error("🛑 **API Rate Limit Exceeded (429)**: The model's free-tier rate limit has been reached. Please wait a moment before trying again, or upgrade your key.")
+    elif "UNAVAILABLE" in error_msg or "503" in error_msg:
+        st.error("🛑 **Model Unavailable (503)**: Google's API is currently experiencing high demand. Please try running the agent again in a few seconds.")
+    elif "authentication" in error_msg.lower() or "api_key" in error_msg.lower() or "credentials" in error_msg.lower():
+        st.error("🛑 **Authentication Error**: Could not resolve authentication method. Please check that you entered a valid API Key in the sidebar.")
     else:
-        st.session_state.state = final_state
-        st.session_state.pending_interrupt = None
-    st.rerun()
+        st.error(f"🛑 **Execution Error**: {error_msg}")
+
+if run_clicked:
+    # Validate API Key before execution
+    key_error = False
+    provider_name = os.getenv("LLM_PROVIDER", "gemini").lower()
+    if provider_name == "gemini":
+        api_key = os.environ.get("GOOGLE_API_KEY", "")
+        if not api_key or api_key == "your_google_key_here":
+            st.error("🔑 **API Key Error**: Google API Key is missing. Please enter your Google API Key in the sidebar to run the agent.")
+            key_error = True
+    elif provider_name == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key or api_key == "your_openai_key_here":
+            st.error("🔑 **API Key Error**: OpenAI API Key is missing. Please enter your OpenAI API Key in the sidebar to run the agent.")
+            key_error = True
+    elif provider_name == "anthropic":
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key or api_key == "your_anthropic_key_here":
+            st.error("🔑 **API Key Error**: Anthropic API Key is missing. Please enter your Anthropic API Key in the sidebar to run the agent.")
+            key_error = True
+
+    if not key_error:
+        placeholder = st.empty()
+        try:
+            final_state, interrupt_payload = run_agent_streaming(
+                initial_state(goal, mode), mode, placeholder
+            )
+            if interrupt_payload is not None:
+                st.session_state.pending_interrupt = interrupt_payload
+                st.session_state.state = graph.get_state(config).values
+            else:
+                st.session_state.state = final_state
+                st.session_state.pending_interrupt = None
+            st.rerun()
+        except Exception as e:
+            handle_execution_error(e)
 
 # --- human-in-the-loop review gate ---------------------------------------------------
 if st.session_state.pending_interrupt:
-    st.warning("⏸️ Agent paused for Human-in-the-Loop review")
+    st.warning("Agent paused for Human-in-the-Loop review")
     payload = st.session_state.pending_interrupt
 
     st.subheader(f"Draft subject: {payload['subject']}")
@@ -574,33 +609,39 @@ if st.session_state.pending_interrupt:
     st.info(f"Blended score: {payload['critique_score']}/10 — {payload['critique_feedback']}")
     breakdown = payload.get("critique_breakdown")
     if breakdown:
-        st.markdown("**Critic ensemble breakdown**")
+        st.markdown("Critic ensemble breakdown")
         render_critic_breakdown(breakdown.get("factual"), breakdown.get("tone"), breakdown.get("structure"))
 
     feedback = st.text_area("Feedback for revision (leave blank if approving)")
     c1, c2 = st.columns(2)
 
-    if c1.button("✅ Approve & Send", type="primary", width="stretch"):
+    if c1.button("Approve & Send", type="primary", width="stretch"):
         placeholder = st.empty()
-        final_state, interrupt_payload = run_agent_streaming(
-            Command(resume={"decision": "approve"}), mode, placeholder
-        )
-        st.session_state.state = final_state if final_state else graph.get_state(config).values
-        st.session_state.pending_interrupt = interrupt_payload
-        st.rerun()
-
-    if c2.button("♻️ Request Revision", width="stretch"):
-        placeholder = st.empty()
-        final_state, interrupt_payload = run_agent_streaming(
-            Command(resume={"decision": "revise", "feedback": feedback}), mode, placeholder
-        )
-        if interrupt_payload is not None:
+        try:
+            final_state, interrupt_payload = run_agent_streaming(
+                Command(resume={"decision": "approve"}), mode, placeholder
+            )
+            st.session_state.state = final_state if final_state else graph.get_state(config).values
             st.session_state.pending_interrupt = interrupt_payload
-            st.session_state.state = graph.get_state(config).values
-        else:
-            st.session_state.state = final_state
-            st.session_state.pending_interrupt = None
-        st.rerun()
+            st.rerun()
+        except Exception as e:
+            handle_execution_error(e)
+
+    if c2.button("Request Revision", width="stretch"):
+        placeholder = st.empty()
+        try:
+            final_state, interrupt_payload = run_agent_streaming(
+                Command(resume={"decision": "revise", "feedback": feedback}), mode, placeholder
+            )
+            if interrupt_payload is not None:
+                st.session_state.pending_interrupt = interrupt_payload
+                st.session_state.state = graph.get_state(config).values
+            else:
+                st.session_state.state = final_state
+                st.session_state.pending_interrupt = None
+            st.rerun()
+        except Exception as e:
+            handle_execution_error(e)
 
 if not st.session_state.pending_interrupt and st.session_state.state:
     final = st.session_state.state
